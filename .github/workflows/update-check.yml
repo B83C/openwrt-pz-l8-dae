@@ -1,0 +1,43 @@
+# Weekly check of upstream components (OpenWrt pin, PR #21495, BDF, dae).
+# Opens/updates an issue when newer versions are available so a human can
+# decide whether to bump pins and rebuild.
+
+name: Check upstream updates
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run upstream check
+        id: check
+        continue-on-error: true
+        run: ./scripts/check-upstream.sh updates.md
+
+      - name: Create or update issue
+        if: steps.check.outcome == 'failure'   # exit 10 = updates available
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "Upstream updates available"
+          LABEL: "upstream-update"
+        run: |
+          ISSUE_NR=$(gh issue list --state open --search "$TITLE in:title" \
+            --json number --jq '.[0].number // ""')
+          BODY=$(cat updates.md)
+          if [ -n "$ISSUE_NR" ]; then
+            gh issue comment "$ISSUE_NR" --body "$BODY"
+            gh issue edit "$ISSUE_NR" --add-label "$LABEL" || true
+          else
+            gh issue create --title "$TITLE" --body "$BODY" --label "$LABEL" || \
+              gh issue create --title "$TITLE" --body "$BODY"
+          fi

@@ -1,5 +1,20 @@
 # OpenWrt Firmware for CMCC PZ-L8
 
+> **This fork adds** on top of the upstream project:
+> - **`dae` v2.x baked into the router image** (eBPF transparent proxy, geo data included)
+> - Kernel with **BTF, netkit, cgroup-bpf, kprobes/BPF-events, veth, TC-BPF** — everything dae's eBPF control plane needs
+> - netifd kernel-header compat patch (`ETHTOOL_A_PSE_PRIO`)
+> - Smart release-toolchain matching in `build.sh` (pins snapshot drift)
+> - Weekly **upstream update checks** via CI (`.github/workflows/update-check.yml`)
+>
+> Router-mode image = OpenWrt + Wi-Fi (ath11k-smallbuffers) + dae. Configure dae at
+> `/etc/dae/config.dae` after first boot, then `/etc/init.d/dae enable && /etc/init.d/dae start`.
+>
+> Attribution: upstream [CrazyBoyFeng/openwrt-pz-l8](https://github.com/CrazyBoyFeng/openwrt-pz-l8),
+> PZ-L8 support & ath11k-smallbuffers via [openwrt PR #20681](https://github.com/openwrt/openwrt/pull/20681)
+> / [#21495](https://github.com/openwrt/openwrt/pull/21495) (hzyitc, Chang Liu et al.).
+> `dae` is [daeuniverse/dae](https://github.com/daeuniverse/dae) (AGPL-3.0) — unmodified upstream release binary.
+
 [简体中文](README.zh-Hans.md)
 
 OpenWrt firmware with Wi-Fi support for CMCC PZ-L8 router, available in two variants:

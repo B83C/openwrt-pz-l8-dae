@@ -1,0 +1,13 @@
+diff --git a/target/linux/qualcommax/config-6.12 b/target/linux/qualcommax/config-6.12
+index 43f4e25744..dfc24e7917 100644
+--- a/target/linux/qualcommax/config-6.12
++++ b/target/linux/qualcommax/config-6.12
+@@ -623,3 +623,8 @@ CONFIG_ZONE_DMA32=y
+ CONFIG_ZSTD_COMMON=y
+ CONFIG_ZSTD_COMPRESS=y
+ CONFIG_ZSTD_DECOMPRESS=y
++
++# --- eBPF / dae support (CMCC PZ-L8) ---
++CONFIG_NETKIT=y
++CONFIG_BPF_STREAM_PARSER=y
++CONFIG_CGROUP_BPF=y

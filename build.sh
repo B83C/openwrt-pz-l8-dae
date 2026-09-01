@@ -431,59 +431,75 @@ update_feeds() {
     ./scripts/feeds install -a
 }
 
-download_toolchain() {
+install_local_packages() {
+    # Install locally-maintained packages and package patches into the
+    # OpenWrt tree. Runs from inside the openwrt/ directory.
     echo ""
-    echo "=== Trying precompiled toolchain ==="
-    TOOLCHAIN_URL="https://downloads.openwrt.org/snapshots/targets/${TARGET}/${SUBTARGET}/"
-    TOOLCHAIN_FILE=$(curl -sL "$TOOLCHAIN_URL" 2>/dev/null | grep -oP 'openwrt-toolchain[^"]+tar\.zst' | head -1)
+    echo "=== Installing local packages ==="
+    for pkg_dir in "$PROJECT_ROOT"/packages/*/; do
+        [ -d "$pkg_dir" ] || continue
+        pkg_name="$(basename "$pkg_dir")"
+        echo "--- Installing local package: $pkg_name ---"
+        rm -rf "package/$pkg_name"
+        cp -a "$pkg_dir" "package/$pkg_name"
+    done
+    if [ -d "$PROJECT_ROOT/patches/netifd" ]; then
+        echo "--- Installing netifd package patches ---"
+        mkdir -p package/network/config/netifd/patches
+        cp -a "$PROJECT_ROOT"/patches/netifd/*.patch package/network/config/netifd/patches/
+    fi
+    echo "=== Local packages installed ==="
+}
 
-    if [ -z "$TOOLCHAIN_FILE" ]; then
-        echo "No precompiled toolchain found, will compile from source"
-        return
+download_toolchain() {
+    # Fetch a precompiled toolchain that matches the GCC version the pinned
+    # OpenWrt tree expects. Snapshot toolchains may drift from the pinned
+    # tree's GCC (e.g. 14.4.0 vs 14.3.0), so we match against the newest
+    # official release instead; fall back to a source build if none matches.
+    echo ""
+    echo "=== Fetching matching precompiled toolchain ==="
+    local gcc_ver tc_file tc_url rel tmpd src
+    gcc_ver="$(sed -n 's/^[[:space:]]*default "\([0-9.]*\)".*/\1/p' toolchain/gcc/Config.version | head -1)"
+    [ -n "$gcc_ver" ] || gcc_ver="14.3.0"
+    echo "Pinned tree expects GCC ${gcc_ver}"
+
+    rel="$(curl -sL --http1.1 --retry 3 https://downloads.openwrt.org/releases/ \
+        | grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' \
+        | sort -V | tail -1)"
+    if [ -z "$rel" ]; then
+        echo "::warning::Could not list releases; will compile toolchain from source"
+        return 0
+    fi
+    echo "Newest stable release: ${rel}"
+
+    tc_url="https://downloads.openwrt.org/releases/${rel}/targets/${TARGET}/${SUBTARGET}/"
+    tc_file="$(curl -sL --http1.1 --retry 3 "$tc_url" \
+        | grep -oE "openwrt-toolchain-${rel}-${TARGET}-${SUBTARGET}_gcc-${gcc_ver}_musl\.Linux-x86_64\.tar\.zst" | head -1)"
+    if [ -z "$tc_file" ]; then
+        echo "No release toolchain matching GCC ${gcc_ver}; will compile from source"
+        return 0
     fi
 
-    echo "Downloading $TOOLCHAIN_FILE ..."
-    # Use HTTP/1.1 to avoid HTTP/2 PROTOCOL_ERROR on flaky runner networks.
-    # Retry up to 5 times with 5s delay to ride out transient failures
-    # (downloads.openwrt.org occasionally drops connections mid-stream).
-    if curl -LO --http1.1 --retry 5 --retry-delay 5 --retry-connrefused \
-            "${TOOLCHAIN_URL}${TOOLCHAIN_FILE}"; then
-        echo "Extracting $TOOLCHAIN_FILE ..."
-        # Extract to a temporary directory to avoid polluting the source tree
-        TMPDIR_TOOLCHAIN="$(mktemp -d)"
-        if zstd -d "$TOOLCHAIN_FILE" -o "$TMPDIR_TOOLCHAIN/toolchain.tar" && \
-           tar -xf "$TMPDIR_TOOLCHAIN/toolchain.tar" -C "$TMPDIR_TOOLCHAIN"; then
-            rm -f "$TOOLCHAIN_FILE" "$TMPDIR_TOOLCHAIN/toolchain.tar"
-            # Find the toolchain directory: try both structures
-            # Structure A: openwrt-toolchain-*/toolchain-* (OpenWrt toolchain tar)
-            # Structure B: openwrt-toolchain-*/staging_dir/toolchain-*
-            # Structure C: (flat, no wrapper) staging_dir/toolchain-*
-            TOOLCHAIN_SRC=""
-            WRAPPER=$(find "$TMPDIR_TOOLCHAIN" -maxdepth 1 -type d -name "openwrt-toolchain-*" | head -1)
-            SEARCH_ROOT="${WRAPPER:-$TMPDIR_TOOLCHAIN}"
-            TOOLCHAIN_SRC=$(find "$SEARCH_ROOT" -maxdepth 2 -type d -name "toolchain-aarch64_*" | head -1)
-            if [ -z "$TOOLCHAIN_SRC" ]; then
-                TOOLCHAIN_SRC=$(find "$SEARCH_ROOT" -maxdepth 3 -type d -path "*/staging_dir/toolchain-*" | head -1)
-            fi
-            if [ -n "$TOOLCHAIN_SRC" ]; then
-                TOOLCHAIN_NAME=$(basename "$TOOLCHAIN_SRC")
-                echo "=== Installing precompiled toolchain ($TOOLCHAIN_NAME) to staging_dir/ ==="
-                cp -a "$TOOLCHAIN_SRC" staging_dir/
-                echo "=== Precompiled toolchain installed ==="
-            else
-                echo "::warning::No toolchain found in extracted archive, will compile from source"
-                echo "Top-level contents:"
-                ls "$SEARCH_ROOT/" | head -10
-            fi
-            rm -rf "$TMPDIR_TOOLCHAIN"
+    echo "Downloading ${tc_file} ..."
+    if ! curl -LO --http1.1 --retry 5 --retry-delay 5 --retry-connrefused "${tc_url}${tc_file}"; then
+        echo "::warning::Toolchain download failed; will compile from source"
+        return 0
+    fi
+
+    tmpd="$(mktemp -d)"
+    if zstd -d "$tc_file" -o "$tmpd/tc.tar" && tar -xf "$tmpd/tc.tar" -C "$tmpd"; then
+        src="$(find "$tmpd" -maxdepth 2 -type d -name "toolchain-aarch64_*" | head -1)"
+        if [ -n "$src" ]; then
+            rm -rf staging_dir/toolchain-aarch64_*
+            cp -a "$src" staging_dir/
+            echo "=== Precompiled release toolchain ($(basename "$src")) installed ==="
         else
-            echo "Failed to extract toolchain, will compile from source"
-            rm -f "$TOOLCHAIN_FILE" "$TMPDIR_TOOLCHAIN/toolchain.tar"
-            rm -rf "$TMPDIR_TOOLCHAIN"
+            echo "::warning::No toolchain dir in archive; will compile from source"
         fi
     else
-        echo "Failed to download toolchain, will compile from source"
+        echo "::warning::Toolchain extraction failed; will compile from source"
     fi
+    rm -rf "$tmpd" "$tc_file"
 }
 
 build_variants() {
@@ -664,6 +680,7 @@ main() {
     merge_pr_21495
     apply_openwrt_patches
     apply_kernel_patches
+    install_local_packages
     download_bdf_files
     setup_ccache
     update_feeds
