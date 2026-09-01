@@ -459,13 +459,14 @@ download_toolchain() {
     echo ""
     echo "=== Fetching matching precompiled toolchain ==="
     local gcc_ver tc_file tc_url rel tmpd src
-    gcc_ver="$(sed -n 's/^[[:space:]]*default "\([0-9.]*\)".*/\1/p' toolchain/gcc/Config.version | head -1)"
+    # Take the unconditional default (skip 'default "X" if CONDITION' lines)
+    gcc_ver="$(awk -F'"' '/^[[:space:]]*default "[0-9.]+"/ && !/[[:space:]]if[[:space:]]/ {print $2; exit}' toolchain/gcc/Config.version)"
     [ -n "$gcc_ver" ] || gcc_ver="14.3.0"
     echo "Pinned tree expects GCC ${gcc_ver}"
 
     rel="$(curl -sL --http1.1 --retry 3 https://downloads.openwrt.org/releases/ \
         | grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' \
-        | sort -V | tail -1)"
+        | sort -V | tail -1 || true)"
     if [ -z "$rel" ]; then
         echo "::warning::Could not list releases; will compile toolchain from source"
         return 0
@@ -474,7 +475,7 @@ download_toolchain() {
 
     tc_url="https://downloads.openwrt.org/releases/${rel}/targets/${TARGET}/${SUBTARGET}/"
     tc_file="$(curl -sL --http1.1 --retry 3 "$tc_url" \
-        | grep -oE "openwrt-toolchain-${rel}-${TARGET}-${SUBTARGET}_gcc-${gcc_ver}_musl\.Linux-x86_64\.tar\.zst" | head -1)"
+        | grep -oE "openwrt-toolchain-${rel}-${TARGET}-${SUBTARGET}_gcc-${gcc_ver}_musl\.Linux-x86_64\.tar\.zst" | head -1 || true)"
     if [ -z "$tc_file" ]; then
         echo "No release toolchain matching GCC ${gcc_ver}; will compile from source"
         return 0
