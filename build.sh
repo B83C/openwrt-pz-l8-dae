@@ -427,8 +427,28 @@ download_bdf_files() {
 update_feeds() {
     echo ""
     echo "=== Updating feeds ==="
+    add_custom_feeds
     ./scripts/feeds update -a
     ./scripts/feeds install -a
+}
+
+# Register any extra feeds declared under feeds.d/*.conf (or, if that
+# directory does not exist, do nothing). Each file is one line of the
+# feeds.conf.default format. Runs *before* `./scripts/feeds update -a`
+# so custom feeds are pulled in alongside the stock ones.
+add_custom_feeds() {
+    [ -d "$PROJECT_ROOT/feeds.d" ] || return 0
+    local f
+    for f in "$PROJECT_ROOT"/feeds.d/*.conf; do
+        [ -f "$f" ] || continue
+        local entry
+        entry="$(tr -d '[:space:]' <"$f")"
+        [ -n "$entry" ] || continue
+        if ! grep -qF "$entry" feeds.conf.default 2>/dev/null; then
+            echo "  + custom feed: $entry"
+            echo "$entry" >> feeds.conf.default
+        fi
+    done
 }
 
 install_local_packages() {
