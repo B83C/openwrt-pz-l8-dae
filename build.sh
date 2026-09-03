@@ -441,9 +441,14 @@ add_custom_feeds() {
     local f
     for f in "$PROJECT_ROOT"/feeds.d/*.conf; do
         [ -f "$f" ] || continue
+        # Strip leading/trailing whitespace and inline comments. Preserve
+        # the internal whitespace (which is significant in feeds.conf: the
+        # three space-separated fields are src-type, name, and URL).
         local entry
-        entry="$(tr -d '[:space:]' <"$f")"
+        entry="$(sed -e 's/#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$f")"
         [ -n "$entry" ] || continue
+        # Normalize multiple internal spaces to single spaces.
+        entry="$(printf '%s' "$entry" | tr -s ' ')"
         if ! grep -qF "$entry" feeds.conf.default 2>/dev/null; then
             echo "  + custom feed: $entry"
             echo "$entry" >> feeds.conf.default
